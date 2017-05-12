@@ -2,8 +2,8 @@ package inform
 
 import (
 	"errors"
-	"fmt"
 	"github.com/ZAP-Quebec/unifi-inform/binary"
+	messages "github.com/ZAP-Quebec/unifi-inform/data"
 )
 
 const (
@@ -25,20 +25,14 @@ var (
 	}
 )
 
-type MAC []byte
-
-func (m MAC) IsValid() bool {
-	return len(m) == 6
-}
-
 type Packet struct {
-	ap    []byte
+	ap    messages.MacAddr
 	flags uint16
-	key   Key
-	Msg   Message
+	key   messages.Key
+	Msg   messages.Message
 }
 
-func NewPacket(ap []byte, msg Message, k Key) *Packet {
+func NewPacket(ap messages.MacAddr, msg messages.Message, k messages.Key) *Packet {
 	flags := SNAPPY_FLAG
 	if k != nil {
 		flags = flags | ENCRYPT_FLAG
@@ -66,16 +60,13 @@ func (p Packet) IsSnappy() bool {
 func (p Packet) Marshal() (result []byte, err error) {
 	msg := p.Msg.Marshal()
 
-	var l int
 	if p.IsZLib() {
 		msg, err = CompressZLib(msg)
 		if err != nil {
 			return
 		}
 	} else if p.IsSnappy() {
-		l = len(msg)
 		msg, err = CompressSnappy(msg)
-		fmt.Printf("Snappy %d => %d \n", l, len(msg))
 		if err != nil {
 			return
 		}
@@ -88,7 +79,6 @@ func (p Packet) Marshal() (result []byte, err error) {
 			return
 		}
 		msg, err = Encrypt(iv, p.key, msg)
-		fmt.Printf("iv: %s key: %s \n", Key(iv).String(), p.key.String())
 		if err != nil {
 			return
 		}
@@ -107,11 +97,60 @@ func (p Packet) Marshal() (result []byte, err error) {
 	b.WriteUInt32BE(32, DATA_VERSION)
 	b.WriteUInt32BE(36, uint32(len(msg)))
 	b.Write(40, msg)
-	fmt.Printf("Msg: f:%d l:%d \n", p.flags, len(msg))
 
 	return b, nil
 }
 
-func (p *Packet) Unmarshal(data []byte) error {
-	return nil
+func (p *Packet) Unmarshal(data []byte, keyFetcher func(messages.MacAddr) (messages.Key, error)) (err error) {
+
+	b := binary.Buffer(data)
+
+	if len(data) < 40 {
+		return errors.New("Invalid packet length.")
+	}
+	dataLength := uint(b.ReadUInt32BE(36))
+	if uint(len(data)) < dataLength+40 {
+		return errors.New("Invalid packet length.")
+	}
+	if b.ReadUInt32BE(0) != MAGIC_NUMBER {
+		return errors.New("Invalid magic number at start of packet.")
+	}
+	if b.ReadUInt32BE(4) != INFORM_VERSION {
+		return errors.New("Unkwown inform version.")
+	}
+	if b.ReadUInt32BE(32) != DATA_VERSION {
+		return errors.New("Unkwown data version.")
+	}
+
+	p.ap = b.Read(8, 14)
+
+	p.flags = b.ReadUInt16BE(14)
+
+	msg := b.Read(40, 40+dataLength)
+	if p.IsEncrypted() {
+		iv := IV(b.Read(16, 32))
+		p.key, err = keyFetcher(p.ap)
+		if err != nil {
+			return err
+		}
+		msg, err = Decrypt(iv, p.key, msg)
+		if err != nil {
+			return err
+		}
+	}
+
+	if p.IsZLib() {
+		msg, err = DecompressZLib(msg)
+		if err != nil {
+			return err
+		}
+	} else if p.IsSnappy() {
+		msg, err = DecompressSnappy(msg)
+		if err != nil {
+			return err
+		}
+	}
+
+	p.Msg, err = messages.Unmarshal(msg)
+	return err
 }

@@ -1,4 +1,4 @@
-package inform
+package data
 
 import (
 	"encoding/hex"
@@ -18,4 +18,8 @@ func (m MacAddr) String() string {
 
 func (m MacAddr) HexString() string {
 	return hex.EncodeToString(m)
+}
+
+func (m MacAddr) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + m.String() + `"`), nil
 }

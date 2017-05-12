@@ -21,3 +21,18 @@ func (b Buffer) WriteUInt32BE(offset uint, v uint32) {
 	b[offset+2] = byte((v & 0x0000ff00) >> 8)
 	b[offset+3] = byte(v & 0x000000ff)
 }
+
+func (b Buffer) Read(offset, end uint) []byte {
+	return b[offset:end]
+}
+
+func (b Buffer) ReadUInt16BE(offset uint) uint16 {
+	return (uint16(b[offset]) << 8) + uint16(b[offset+1])
+}
+
+func (b Buffer) ReadUInt32BE(offset uint) uint32 {
+	return ((uint32(b[offset]) << 24) +
+		(uint32(b[offset+1]) << 16) +
+		(uint32(b[offset+2]) << 8) +
+		uint32(b[offset+3]))
+}

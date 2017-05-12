@@ -2,46 +2,47 @@ package inform
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
+	messages "github.com/ZAP-Quebec/unifi-inform/data"
+	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 )
 
 type Client struct {
-	mac     MAC
-	key     Key
+	mac     messages.MacAddr
+	key     messages.Key
 	address string
-	http    *http.Client
 }
 
-func NewClient(m MAC, address string) *Client {
+var httpClient = &http.Client{
+	Transport: &http.Transport{
+		DisableCompression: true,
+		DisableKeepAlives:  true,
+	},
+}
+
+func NewClient(m messages.MacAddr, address string) *Client {
 	if !m.IsValid() {
 		panic("Invalid mac address")
 	}
 	return &Client{
 		mac:     m,
-		key:     DEFAULT_KEY,
+		key:     messages.DEFAULT_KEY,
 		address: address,
-		http: &http.Client{
-			Transport: &http.Transport{
-				DisableCompression: true,
-				DisableKeepAlives:  true,
-			},
-		},
 	}
 }
 
-func (c *Client) SendInform() (InformResponse, error) {
+func (c *Client) SendInform() (messages.InformResponse, error) {
 	p := NewPacket(c.mac, &fakeInform{
-		m: MacAddr(c.mac),
+		m: c.mac,
 	}, c.key)
 	body, err := p.Marshal()
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Printf("flags : %d \n", p.flags)
 
 	r := bytes.NewReader(body)
 	req, err := http.NewRequest("POST", c.address, r)
@@ -49,20 +50,42 @@ func (c *Client) SendInform() (InformResponse, error) {
 		return nil, err
 	}
 
-	req.Host = "192.168.1.15"
-	//setHeader(req, "Host", )
-	setHeader(req, "user-agent", "AirControl Agent v1.0")
-	setHeader(req, "content-type", "application/x-binary")
-	setHeader(req, "content-length", strconv.Itoa(len(body)))
-
-	resp, err := c.http.Do(req)
+	addr, err := url.Parse(c.address)
 	if err != nil {
 		return nil, err
 	}
 
-	fmt.Println(resp.StatusCode, resp.Status)
+	req.Host = addr.Hostname()
+	setHeader(req, "user-agent", "AirControl Agent v1.0")
+	setHeader(req, "content-type", "application/x-binary")
+	setHeader(req, "content-length", strconv.Itoa(len(body)))
 
-	return nil, nil
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "application/x-binary" {
+		return messages.ResponseFromHttpCode(resp.StatusCode), nil
+	}
+
+	data, err := ioutil.ReadAll(resp.Body)
+
+	rPacket := &Packet{}
+
+	err = rPacket.Unmarshal(data, func(ap messages.MacAddr) (messages.Key, error) {
+		return messages.DEFAULT_KEY, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if informResp, ok := rPacket.Msg.(messages.InformResponse); !ok {
+		return nil, errors.New("Invalid")
+	} else {
+		return informResp, nil
+	}
 }
 
 func setHeader(r *http.Request, key, value string) {
@@ -78,7 +101,7 @@ func (c *Client) StartDiscovery() {
 }
 
 type fakeInform struct {
-	m MacAddr
+	m messages.MacAddr
 }
 
 func (f fakeInform) Marshal() []byte {

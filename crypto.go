@@ -5,38 +5,15 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ZAP-Quebec/unifi-inform/data"
 )
 
-type IV Key
-
-type Key []byte
-
-func (k Key) IsValid() bool {
-	return len(k) == blockSize
-}
-
-func (k Key) IsDefault() bool {
-	return bytes.Equal(k, DEFAULT_KEY)
-}
-
-func (k Key) String() string {
-	return hex.EncodeToString(k)
-}
-
-var (
-	DEFAULT_KEY = Key([]byte{
-		0xba, 0x86, 0xf2, 0xbb,
-		0xe1, 0x07, 0xc7, 0xc5,
-		0x7e, 0xb5, 0xf2, 0x69,
-		0x07, 0x75, 0xc7, 0x12,
-	})
-)
+type IV data.Key
 
 const (
-	blockSize int = 16 // bytes
+	blockSize int = data.KEY_SIZE // bytes
 )
 
 func GenerateIV() (IV, error) {
@@ -49,7 +26,7 @@ func GenerateIV() (IV, error) {
 	return iv, nil
 }
 
-func Encrypt(iv IV, key Key, data []byte) (result []byte, err error) {
+func Encrypt(iv IV, key data.Key, data []byte) (result []byte, err error) {
 	if err = assertCryptoParams(iv, key); err != nil {
 		return
 	}
@@ -74,7 +51,7 @@ func Encrypt(iv IV, key Key, data []byte) (result []byte, err error) {
 	return dstBuf, nil
 }
 
-func Decrypt(iv, key, data []byte) (result []byte, err error) {
+func Decrypt(iv IV, key data.Key, data []byte) (result []byte, err error) {
 	if err = assertCryptoParams(iv, key); err != nil {
 		return
 	}
@@ -101,8 +78,8 @@ func Decrypt(iv, key, data []byte) (result []byte, err error) {
 	return result[:dataLen-padLen], nil
 }
 
-func assertCryptoParams(iv IV, key Key) error {
-	if !Key(iv).IsValid() {
+func assertCryptoParams(iv IV, key data.Key) error {
+	if !data.Key(iv).IsValid() {
 		return fmt.Errorf("iv length must be %d bytes [len(iv)==%d]", blockSize, len(iv))
 	}
 	if !key.IsValid() {
